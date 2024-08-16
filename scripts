@@ -1,0 +1,225 @@
+pip install pandas numpy
+pip install openpyxl
+
+
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+# Leer las fuentes de datos
+customers_df     = pd.read_excel(r'C:\Users\admin\Desktop\NAO\Fuente de Datos\olist_customers_dataset.xlsx')
+orders_df        = pd.read_csv(r'C:\Users\admin\Desktop\NAO\Fuente de Datos\olist_orders_dataset.csv')
+geolocation_df   = pd.read_csv(r'C:\Users\admin\Desktop\NAO\Fuente de Datos\olist_geolocation_dataset.csv')
+order_items_df   = pd.read_csv(r'C:\Users\admin\Desktop\NAO\Fuente de Datos\olist_order_items_dataset.csv')
+payments_df      = pd.read_csv(r'C:\Users\admin\Desktop\NAO\Fuente de Datos\olist_order_payments_dataset.csv')
+states_df        = pd.read_json(r'C:\Users\admin\Desktop\NAO\Fuente de Datos\states_abbreviations.json')
+
+# Consolidar los datos
+df = pd.merge(orders_df, customers_df, on='customer_id', how='left')
+df = pd.merge(df, geolocation_df, left_on='customer_zip_code_prefix', right_on='geolocation_zip_code_prefix', how='left')
+df = pd.merge(df, states_df, left_on='geolocation_state', right_on='state_name', how='left')
+df = pd.merge(df, order_items_df, on='order_id', how='left')
+df = pd.merge(df, payments_df, on='order_id', how='left')
+
+# Campos calculados
+df['total_products']                = df.groupby('order_id')['order_item_id'].transform('count')
+df['total_sales']                   = df.groupby('order_id')['payment_value'].transform('sum')
+df['order_purchase_timestamp']      = pd.to_datetime(df['order_purchase_timestamp'])
+df['year']                          = df['order_purchase_timestamp'].dt.year
+df['month']                         = df['order_purchase_timestamp'].dt.month
+df['quarter']                       = df['order_purchase_timestamp'].dt.quarter
+df['year_month']                    = df['order_purchase_timestamp'].dt.to_period('M').astype(str)
+df['order_delivered_customer_date'] = pd.to_datetime(df['order_delivered_customer_date'])
+df['order_estimated_delivery_date'] = pd.to_datetime(df['order_estimated_delivery_date'])
+df['delta_days']                    = (df['order_delivered_customer_date'] - df['order_estimated_delivery_date']).dt.days
+df['delay_status']                  = df['delta_days'].apply(lambda x: 'no_delay' if pd.isna(x) or x <= 0 else ('short_delay' if x <= 3 else 'long_delay'))
+
+# Guardar el DataFrame consolidado en un archivo CSV
+output_path = r'C:\Users\admin\Desktop\NAO\Tabla consolidada\oilst_processed.csv'
+df.to_csv(output_path, index=False)
+
+print(f"El archivo {output_path} ha sido creado exitosamente.")
+
+#El archivo resulto ser muy grande asi que obtamos por dividirlo
+
+import pandas as pd
+
+# Definir la ruta del archivo CSV grande
+input_path = r'C:\Users\admin\Desktop\NAO\Tabla consolidada\oilst_processed.csv'
+output_folder = r'C:\Users\admin\Desktop\NAO\Tabla consolidada'
+
+# Leer el archivo CSV en bloques y guardarlos en archivos más pequeños
+chunk_size = 10**6  # Ajusta el tamaño del bloque según sea necesario
+for i, chunk in enumerate(pd.read_csv(input_path, chunksize=chunk_size)):
+    chunk.to_csv(f'{output_folder}\\oilst_processed_part_{i}.csv', index=False)
+
+print("El archivo ha sido dividido en partes más pequeñas exitosamente.")
+
+#Analisis 1
+
+
+# calcule la proporción que han representado las ventas de órdenes completas de Oilst dentro de los 
+# categorías de delay_status y a los largo de los trimestres de 2016 a 2018.
+
+#============================================================================================================================
+#============================================================================================================================
+
+import pandas as pd
+
+input_folder = r'C:\Users\admin\Desktop\NAO\Tabla consolidada'
+results_df = pd.DataFrame()
+
+# Iterar sobre los archivos divididos
+for i in range(19):  
+    file_path = f'{input_folder}\\oilst_processed_part_{i}.csv'
+    df = pd.read_csv(file_path)
+    df = df[df['order_status'] == 'delivered']
+    
+    grouped = df.groupby(['year', 'quarter', 'delay_status']).agg({'total_sales': 'sum'}).reset_index()
+    
+    # proporción de ventas
+    total_sales_by_quarter = grouped.groupby(['year', 'quarter'])['total_sales'].transform('sum')
+    grouped['proportion'] = grouped['total_sales'] / total_sales_by_quarter
+    
+    # resultados
+    results_df = pd.concat([results_df, grouped], ignore_index=True)
+
+output_path = r'C:\Users\admin\Desktop\NAO\Resultados\prop_sales_delay_status_by_quarte.csv'
+results_df.to_csv(output_path, index=False)
+
+print(f"El archivo {output_path} ha sido creado exitosamente.")
+
+#Analisis 2
+
+#número de órdenes que existieron por cantidad de productos dentro de la orden y el tipo de retraso de las categorías delay_status
+
+#============================================================================================================================
+#============================================================================================================================
+
+
+import pandas as pd
+
+input_folder = r'C:\Users\admin\Desktop\NAO\Tabla consolidada'
+results_df = pd.DataFrame()
+
+for i in range(19): 
+    file_path = f'{input_folder}\\oilst_processed_part_{i}.csv'
+    df = pd.read_csv(file_path)
+    df = df[df['order_status'] == 'delivered']
+    
+    # Agrupados por cantidad de productos y estado de retraso
+    grouped = df.groupby(['total_products', 'delay_status']).size().reset_index(name='order_count')
+    
+    # resultados
+    results_df = pd.concat([results_df, grouped], ignore_index=True)
+
+# Guardar el resultado
+output_path = r'C:\Users\admin\Desktop\NAO\Resultados\count_orders_basket_size_by_delay_status.csv'
+results_df.to_csv(output_path, index=False)
+
+print(f"El archivo {output_path} ha sido creado exitosamente.")
+
+
+pip install matplotlib
+
+#Analisis 3
+# Histograma
+
+#============================================================================================================================
+#============================================================================================================================
+
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+input_folder = r'C:\Users\admin\Desktop\NAO\Tabla consolidada'
+
+# lista para acumular las ventas totales de retrasos largos
+long_delay_sales = []
+
+for i in range(19): 
+    file_path = f'{input_folder}\\oilst_processed_part_{i}.csv'
+    df = pd.read_csv(file_path)
+    
+    # Filtrar las órdenes con retraso largo y estado 'delivered'
+    df = df[(df['delay_status'] == 'long_delay') & (df['order_status'] == 'delivered')]
+    
+   #ventas totales
+    long_delay_sales.extend(df['total_sales'])
+
+# De un array de numpy para el análisis
+long_delay_sales = np.array(long_delay_sales)
+
+# Calcular las estadísticas básicas
+mean_sales = np.mean(long_delay_sales)
+std_sales = np.std(long_delay_sales)
+
+# Definir los intervalos 
+lower_bound = mean_sales - 1.76 * std_sales
+upper_bound = mean_sales + 1.76 * std_sales
+
+# Crear el histograma
+plt.figure(figsize=(10, 6))
+plt.hist(long_delay_sales, bins=30, color='skyblue', edgecolor='black')
+plt.axvline(mean_sales, color='red', linestyle='dashed', linewidth=1, label=f'Mean: {mean_sales:.2f}')
+plt.axvline(lower_bound, color='green', linestyle='dashed', linewidth=1, label=f'Lower Bound (88.88%): {lower_bound:.2f}')
+plt.axvline(upper_bound, color='green', linestyle='dashed', linewidth=1, label=f'Upper Bound (88.88%): {upper_bound:.2f}')
+plt.title('Histogram of Total Sales for Long Delay Orders')
+plt.xlabel('Total Sales')
+plt.ylabel('Frequency')
+plt.legend()
+plt.grid(True)
+
+
+output_path = r'C:\Users\admin\Desktop\NAO\Resultados\histogram_sales_long_delay.png'
+plt.savefig(output_path)
+
+print(f"El archivo {output_path} ha sido creado exitosamente.
+
+#Analisis 4
+
+pip install pandas numpy seaborn matplotlib
+
+#calcule la matriz de correlación entre las variables total_sales, total_products, delta_days
+#  y distance_distribution_center para órdenes completadas que cuya fecha de entrega sobrepasa los 10 días de la fecha estimada para la entrega.
+
+#============================================================================================================================
+#============================================================================================================================
+
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+input_folder = r'C:\Users\admin\Desktop\NAO\Tabla consolidada'
+
+df_combined = pd.DataFrame()
+
+
+for i in range(19): 
+    file_path = f'{input_folder}\\oilst_processed_part_{i}.csv'
+    df = pd.read_csv(file_path)
+    
+    # Filtrar las órdenes completadas con un retraso mayor a 10 días
+    df_filtered = df[(df['order_status'] == 'delivered') & (df['delta_days'] > 10)]
+    
+    #columnas que se necesitan
+    df_filtered = df_filtered[['total_sales', 'total_products', 'delta_days', 'distance_distribution_center']]
+    
+    # Acumular los datos filtrados
+    df_combined = pd.concat([df_combined, df_filtered])
+
+# matriz de correlación
+correlation_matrix = df_combined.corr()
+
+#visualización de la matriz de correlación
+plt.figure(figsize=(8, 6))
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
+plt.title('Correlation Matrix for Orders with >10 Days Delay')
+
+
+output_path = r'C:\Users\admin\Desktop\NAO\Resultados\correlation_matrix_10_days_delay.png'
+plt.savefig(output_path)
+
+print(f"El archivo {output_path} ha sido creado exitosamente.")
