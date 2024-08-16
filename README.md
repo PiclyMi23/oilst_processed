@@ -5,7 +5,7 @@ Utilizo bibliotecas de Python y herramientas de visualización de datos en la in
 
 ## Estructura del Repositorio
 
-- `/scripts`: Contiene los scripts de Python usados para el análisis.
+- `/scripts`: Contiene los scripts de Python usados para el análisis. (`Oils_Processed.ipynb`)
 - `/data`: Almacena las partes divididas del archivo CSV.
 - `/results`: Incluye los resultados generados (CSV, PNG, PDF).
 - `README.md`: Este archivo, con una breve descripción del proyecto.
